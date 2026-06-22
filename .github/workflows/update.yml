@@ -1,0 +1,79 @@
+name: Update RBI NFS dashboard
+
+# Runs every day at 16:00 IST (10:30 UTC). You can also trigger it by hand
+
+# from the repo's "Actions" tab (the "Run workflow" button).
+
+on:
+
+  schedule:
+
+    - cron: "30 10 * * *"
+
+  workflow_dispatch: {}
+
+permissions:
+
+  contents: write
+
+concurrency:
+
+  group: rbi-nfs-update
+
+  cancel-in-progress: false
+
+jobs:
+
+  update:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Check out the repository
+
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+
+        uses: actions/setup-python@v5
+
+        with:
+
+          python-version: "3.12"
+
+      - name: Install dependencies
+
+        run: |
+
+          pip install -r requirements.txt
+
+          python -m playwright install --with-deps chromium
+
+      - name: Fetch latest RBI data and rebuild the dashboard
+
+        run: python build_dashboard.py
+
+      - name: Publish if the data changed
+
+        run: |
+
+          git config user.name  "rbi-nfs-bot"
+
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ -n "$(git status --porcelain index.html)" ]; then
+
+            git add index.html
+
+            git commit -m "Auto-update RBI NFS data ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+
+            git push
+
+            echo "Dashboard updated and published."
+
+          else
+
+            echo "No new RBI data today — nothing to publish."
+
+          fi
