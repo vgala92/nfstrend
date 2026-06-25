@@ -1,8 +1,8 @@
 # Auto-updating RBI NFS Dashboard — Setup (one time, ~10 minutes)
 
-This gives you a **public web link** that refreshes itself every day at **4:00 PM IST**.
-A free GitHub robot downloads the latest RBI data, rebuilds the dashboard, and republishes
-it — no computer of yours needs to be switched on.
+This gives you a **public web link** that refreshes itself automatically — a free GitHub robot
+checks RBI **every 2 hours**, downloads any new data, rebuilds the dashboard, and republishes
+it. No computer of yours needs to be switched on. (See **Schedule** below to change the frequency.)
 
 You only do this setup **once**. After that it runs forever on its own.
 
@@ -49,7 +49,38 @@ Keep the folder structure exactly as-is (especially the `.github/workflows` fold
    - Go to the **Actions** tab → click **Update RBI NFS dashboard** → **Run workflow**.
    - Watch it run (a minute or two). A green tick means it worked and republished.
 
-That's it. From now on it runs automatically every day at 4 PM IST.
+That's it. From now on it runs automatically (see the schedule below).
+
+---
+
+## Schedule
+
+The robot runs **every 2 hours — 12 times a day** (cron `17 */2 * * *`, i.e. minute :17 of
+every even hour UTC). In IST that's roughly:
+
+> 05:47, 07:47, 09:47, 11:47, 13:47, 15:47, 17:47, 19:47, 21:47, 23:47, 01:47, 03:47
+
+Why so often, and is that wasteful? No. The build script has a **"no-change" guard**: a run
+that finds no newer RBI data does nothing — no commit, no clutter. So you get at most one commit
+per genuinely new RBI day, while checking frequently means new data appears within ~2 hours of
+RBI posting it, and it no longer matters if GitHub's scheduler delays or skips any single run.
+
+GitHub schedules are "best effort" and can run a few to ~30 minutes late — with 12 daily attempts
+that's irrelevant. To change the frequency, edit the `cron` line in
+`.github/workflows/update.yml` (e.g. `17 */6 * * *` = every 6 hours, `17 4,10,16,22 * * *` =
+4 specific times). Need an instant refresh? Use **Actions → Run workflow**.
+
+## Failure alerts (email)
+
+If a run ever fails (e.g. RBI blocks the download), the workflow automatically **opens a GitHub
+issue** titled "⚠️ RBI NFS auto-update failed" with a link to the failed run. GitHub emails you
+about new issues on your own repo, so that's your alert — no passwords or SMTP setup needed. The
+issue **closes itself automatically** on the next successful run, so it only stays open while
+something is genuinely broken.
+
+To be sure the emails reach you: top-right **profile photo → Settings → Notifications**, and make
+sure email is enabled for Issues/Watching. Your own repos are "watched" by default, so this works
+out of the box for most accounts. (GitHub also emails you when a scheduled workflow fails.)
 
 ---
 
