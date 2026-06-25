@@ -1,77 +1,104 @@
 name: Update RBI NFS dashboard
 
-# Runs every day at 16:00 IST (10:30 UTC). You can also trigger it by hand
-
-# from the repo's "Actions" tab (the "Run workflow" button).
-
+# Runs every 2 hours (12x/day) at an off-peak minute (:17) to dodge GitHub's
+# scheduler congestion. The build script's "no-change" guard means runs that find
+# no new RBI data simply do nothing, so frequent runs are free and create no noise.
+# Times land at xx:17 UTC -> ~05:47, 07:47, 09:47 ... IST (one near 4 PM IST).
+# You can also trigger it by hand from the "Actions" tab ("Run workflow").
 on:
   schedule:
-    - cron: "47 10 * * *"   # ~4:17 PM IST (primary)
-    - cron: "47 11 * * *"   # ~5:17 PM IST (backup, in case GitHub delays/drops the first)
+    - cron: "17 */2 * * *"
   workflow_dispatch: {}
 
+# contents: write -> push the rebuilt dashboard.  issues: write -> open a failure alert.
 permissions:
-
   contents: write
+  issues: write
 
 concurrency:
-
   group: rbi-nfs-update
-
   cancel-in-progress: false
 
 jobs:
-
   update:
-
     runs-on: ubuntu-latest
-
     steps:
-
       - name: Check out the repository
-
         uses: actions/checkout@v4
 
       - name: Set up Python
-
         uses: actions/setup-python@v5
-
         with:
-
           python-version: "3.12"
 
       - name: Install dependencies
-
         run: |
-
           pip install -r requirements.txt
-
           python -m playwright install --with-deps chromium
 
       - name: Fetch latest RBI data and rebuild the dashboard
-
         run: python build_dashboard.py
 
       - name: Publish if the data changed
-
         run: |
-
           git config user.name  "rbi-nfs-bot"
-
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           if [ -n "$(git status --porcelain index.html)" ]; then
-
             git add index.html
-
             git commit -m "Auto-update RBI NFS data ($(date -u +'%Y-%m-%d %H:%M UTC'))"
-
             git push
-
             echo "Dashboard updated and published."
-
           else
-
             echo "No new RBI data today — nothing to publish."
-
           fi
+
+      # ---- Failure alert: opens (or comments on) a single GitHub issue. GitHub
+      #      emails you about it. It auto-closes on the next successful run. ----
+      - name: Open a failure alert (deduped)
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = "⚠️ RBI NFS auto-update failed";
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              "A scheduled RBI NFS dashboard update **failed**.",
+              "",
+              `Run log: ${runUrl}`,
+              "",
+              "Most likely cause: RBI's download was blocked, or the file format changed.",
+              "What to do: open the run log above, or simply re-run the workflow (Actions → Run workflow).",
+              "As a fallback you can update manually — see SETUP.md.",
+              "",
+              "_This issue will close automatically on the next successful run._"
+            ].join("\n");
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner, repo: context.repo.repo, state: "open"
+            });
+            const existing = issues.find(i => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.number, body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo, title, body
+              });
+            }
+
+      - name: Close the failure alert on success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = "⚠️ RBI NFS auto-update failed";
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner, repo: context.repo.repo, state: "open"
+            });
+            for (const i of issues.filter(x => x.title === title)) {
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: i.number, state: "closed"
+              });
+            }
